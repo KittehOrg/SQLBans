@@ -210,6 +210,9 @@ public class SQLBans extends JavaPlugin implements Listener {
         String next;
         try {
             while ((next = reader.readLine()) != null) {
+                if (next.contains("SQLBans_bans")) {
+                    next = next.replace("SQLBans_bans", getConfig().getString("database.tablename"));
+                }
                 builder.append(next);
             }
         } catch (final IOException e) {
