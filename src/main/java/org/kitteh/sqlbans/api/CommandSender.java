@@ -17,35 +17,37 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.kitteh.sqlbans.exceptions;
+package org.kitteh.sqlbans.api;
+
+import org.kitteh.sqlbans.Perm;
 
 /**
- * Something has gone horribly wrong
+ * A command sender.
  */
-public final class SQLBansException extends Exception {
-
-    private static final long serialVersionUID = 1L;
+public interface CommandSender {
 
     /**
-     * Something has gone wrong with a message
+     * Get the name of the CommandSender
+     * If a Player, this is their username
      * 
-     * @param string
-     *            Message
+     * @return the sender's name
      */
-    public SQLBansException(String string) {
-        super(string);
-    }
+    public String getName();
 
     /**
-     * Something has gone wrong with message and a throwable
+     * Get if a CommandSender has a permission
      * 
-     * @param string
-     *            Message
-     * @param throwable
-     *            Further wrongness
+     * @param permission
+     *            Permission to check
+     * @return true if the CommandSender has the permission
      */
-    public SQLBansException(String string, Throwable throwable) {
-        super(string, throwable);
-    }
+    public boolean hasPermission(Perm permission);
 
+    /**
+     * Send the CommandSender a message
+     * 
+     * @param message
+     *            Message to send
+     */
+    public void sendMessage(String message);
 }

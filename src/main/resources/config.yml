@@ -11,12 +11,16 @@ database:
   host: localhost
   port: 3306
   database: sqlbans
-  tablename: SQLBans_bans
+  tablenames: 
+    bans: SQLBans_bans
+    log: SQLBans_log
   auth:
     username: banana
     password: pear
 server-name: default
 messages:
+  command:
+    nopermission: '&&cYou do not have permission to use this command'
   disconnect:
     rejected: '&&cVisit our website for unban'
     kicked:

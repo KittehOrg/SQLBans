@@ -1,13 +1,16 @@
 /*
  * SQLBans
  * Copyright 2012 Matt Baxter
- * 
+ *
+ * Google Gson
+ * Copyright 2008-2011 Google Inc.
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -20,27 +23,28 @@ import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
 
-public class SQLManager {
+final class SQLManager {
 
-    public class SQLConnection {
+    final class SQLConnection {
+
         private Connection connection;
         private final String url;
         private boolean inUse = false;
 
-        public SQLConnection(String url) throws SQLException {
+        SQLConnection(String url) throws SQLException {
             this.connection = DriverManager.getConnection(url);
             this.url = url;
         }
 
-        public Connection getConnection() {
+        Connection getConnection() {
             return this.connection;
         }
 
-        public boolean inUse() {
+        boolean inUse() {
             return this.inUse;
         }
 
-        public void myTurn() throws SQLException {
+        void myTurn() throws SQLException {
             if (this.connection.isValid(1)) {
                 this.connection.close();
                 this.connection = DriverManager.getConnection(this.url);
@@ -48,12 +52,15 @@ public class SQLManager {
             this.inUse = true;
         }
 
-        public void myWorkHereIsDone() {
+        void myWorkHereIsDone() {
             this.inUse = false;
         }
 
-        public void reset() throws SQLException {
-            this.connection.close();
+        void reset() throws SQLException {
+            try {
+                this.connection.close();
+            } catch (final SQLException e) {
+            }
             this.connection = DriverManager.getConnection(this.url);
             this.inUse = false;
         }
@@ -64,7 +71,7 @@ public class SQLManager {
 
     private final SQLConnection[] queryConnections = new SQLConnection[this.conCount];
 
-    public SQLManager(String url) throws ClassNotFoundException, SQLException {
+    SQLManager(String url) throws ClassNotFoundException, SQLException {
         Class.forName("com.mysql.jdbc.Driver");
         this.updateConnection = new SQLConnection(url);
         for (int x = 0; x < this.conCount; x++) {
@@ -72,7 +79,7 @@ public class SQLManager {
         }
     }
 
-    public synchronized SQLConnection getQueryConnection() throws SQLException {
+    synchronized SQLConnection getQueryConnection() throws SQLException {
         int i = 0;
         final long start = System.currentTimeMillis();
         SQLConnection con = null;
@@ -81,9 +88,8 @@ public class SQLManager {
             if (!test.inUse()) {
                 con = test;
             }
-            if ((System.currentTimeMillis() - 5000) > start) {
+            if (!test.getConnection().isValid(1) || ((System.currentTimeMillis() - 5000) > start)) {
                 test.reset();
-                System.out.println("[SQLBans] Something went funky with SQL. Resetting a connection");
                 con = test;
             }
             if (i++ == this.conCount) {
@@ -94,7 +100,7 @@ public class SQLManager {
         return con;
     }
 
-    public synchronized SQLConnection getUpdateConnection() throws SQLException {
+    synchronized SQLConnection getUpdateConnection() throws SQLException {
         final long start = System.currentTimeMillis();
         while (this.updateConnection.inUse()) {
             if ((System.currentTimeMillis() - 5000) > start) {

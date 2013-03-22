@@ -1,13 +1,16 @@
 /*
  * SQLBans
  * Copyright 2012 Matt Baxter
- * 
+ *
+ * Google Gson
+ * Copyright 2008-2011 Google Inc.
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -18,29 +21,32 @@ package org.kitteh.sqlbans;
 
 import java.io.BufferedReader;
 import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.InputStreamReader;
-import java.util.HashSet;
+import java.io.OutputStream;
+import java.net.InetAddress;
+import java.net.URL;
+import java.net.URLConnection;
 import java.util.logging.Level;
+import java.util.logging.Logger;
 
-import org.bukkit.ChatColor;
-import org.bukkit.configuration.file.FileConfiguration;
-import org.bukkit.configuration.file.YamlConfiguration;
-import org.bukkit.event.EventHandler;
-import org.bukkit.event.EventPriority;
-import org.bukkit.event.Listener;
-import org.bukkit.event.player.AsyncPlayerPreLoginEvent;
-import org.bukkit.event.player.AsyncPlayerPreLoginEvent.Result;
-import org.bukkit.plugin.java.JavaPlugin;
+import org.kitteh.sqlbans.api.Player;
+import org.kitteh.sqlbans.api.SQLBansImplementation;
+import org.kitteh.sqlbans.api.Scheduler;
+import org.kitteh.sqlbans.api.UserData;
 import org.kitteh.sqlbans.commands.BanCommand;
 import org.kitteh.sqlbans.commands.KickCommand;
 import org.kitteh.sqlbans.commands.ReloadCommand;
 import org.kitteh.sqlbans.commands.UnbanCommand;
 import org.kitteh.sqlbans.exceptions.SQLBansException;
-import org.kitteh.sqlbans.exceptions.SQLBansThreadingException;
 
-public class SQLBans extends JavaPlugin implements Listener {
-    public static class Messages {
+public final class SQLBans {
+
+    public final static class Messages {
+
+        private static String COMMAND_NO_PERMISSION;
         private static String DISCONNECT_REJECTED;
         private static String DISCONNECT_KICKED_NOREASON;
         private static String DISCONNECT_KICKED_REASON;
@@ -56,6 +62,10 @@ public class SQLBans extends JavaPlugin implements Listener {
         private static String INGAME_BANNED_ADMIN_REASON;
         private static String INGAME_UNBANNED_NORMAL;
         private static String INGAME_UNBANNED_ADMIN;
+
+        public static String getCommandNoPermission() {
+            return Messages.COMMAND_NO_PERMISSION;
+        }
 
         public static String getDisconnectBanned(String reason, String admin) {
             final String ret = reason == null ? Messages.DISCONNECT_BANNED_NOREASON : Messages.DISCONNECT_BANNED_REASON.replace("%reason%", reason);
@@ -96,11 +106,8 @@ public class SQLBans extends JavaPlugin implements Listener {
             return ret.replace("%admin%", admin == null ? "Admin" : admin).replace("%target%", target == null ? "Target" : target);
         }
 
-        public static void load(SQLBans plugin) {
-            plugin.checkThread();
-            final FileConfiguration def = YamlConfiguration.loadConfiguration(plugin.getResource("config.yml"));
-            final FileConfiguration config = plugin.getConfig();
-            plugin.getConfig().setDefaults(def);
+        public static void load(Config config) {
+            Messages.COMMAND_NO_PERMISSION = Messages.color(config.getString("messages.command.nopermission"));
             Messages.DISCONNECT_REJECTED = Messages.color(config.getString("messages.disconnect.rejected"));
             Messages.DISCONNECT_KICKED_NOREASON = Messages.color(config.getString("messages.disconnect.kicked.noreason"));
             Messages.DISCONNECT_KICKED_REASON = Messages.color(config.getString("messages.disconnect.kicked.reason"));
@@ -126,141 +133,357 @@ public class SQLBans extends JavaPlugin implements Listener {
         }
     }
 
-    public static String TABLE_CREATE = null;
+    private final BanCache banCache = new BanCache(this);
+    private Config config;
+    private final SQLBansImplementation implementation;
+    private String serverName;
+    private SQLHandler sql;
 
-    private static String serverName;
+    /**
+     * If you start me up, I'll never stop
+     * But really, please only initialize me once.
+     * 
+     * @param implementation
+     */
+    public SQLBans(SQLBansImplementation implementation) {
+        this.implementation = implementation;
 
-    public static String getServerName() {
-        return SQLBans.serverName;
-    }
-
-    private Thread mainThread;
-
-    private HashSet<String> bannedCache;
-
-    private Object bannedCacheSync;
-
-    public void checkThread() {
-        if (!Thread.currentThread().equals(this.mainThread)) {
-            throw new SQLBansThreadingException();
-        }
-    }
-
-    public void load() {
-        this.reloadConfig();
-        SQLBans.Messages.load(this);
-        final FileConfiguration config = this.getConfig();
-        config.setDefaults(YamlConfiguration.loadConfiguration(this.getResource("config.yml")));
-        SQLBans.serverName = config.getString("server-name");
-        final String host = config.getString("database.host");
-        final int port = config.getInt("database.port");
-        final String db = config.getString("database.database");
-        final String user = config.getString("database.auth.username");
-        final String pass = config.getString("database.auth.password");
-        final String tableName = config.getString("database.tablename");
         try {
-            SQLHandler.start(host, port, user, pass, db, tableName);
+            this.reload();
         } catch (final SQLBansException e) {
-            this.getLogger().log(Level.SEVERE, "Failure to load, shutting down", e);
-            this.getServer().getPluginManager().disablePlugin(this);
-        }
-    }
-
-    @Override
-    public void onEnable() {
-        this.mainThread = Thread.currentThread();
-
-        this.bannedCache = new HashSet<String>() {
-            private static final long serialVersionUID = 1337L;
-
-            @Override
-            public boolean add(String string) {
-                return super.add(string.toLowerCase());
-            }
-
-            @Override
-            public boolean contains(Object object) {
-                if (object instanceof String) {
-                    return super.contains(((String) object).toLowerCase());
-                } else {
-                    return super.contains(object);
-                }
-            }
-
-            @Override
-            public boolean remove(Object object) {
-                if (object instanceof String) {
-                    return super.remove(((String) object).toLowerCase());
-                } else {
-                    return super.remove(object);
-                }
-            }
-        };
-        this.bannedCacheSync = new Object();
-        final File confFile = new File(this.getDataFolder(), "config.yml");
-        if (!confFile.exists()) {
-            this.saveDefaultConfig();
-            this.getLogger().info("SQLBans config established. Edit the config and restart!");
-            this.getServer().getPluginManager().disablePlugin(this);
             return;
         }
 
-        final BufferedReader reader = new BufferedReader(new InputStreamReader(this.getResource("create.sql")));
-        final StringBuilder builder = new StringBuilder();
-        String next;
-        try {
-            while ((next = reader.readLine()) != null) {
-                builder.append(next);
-            }
-        } catch (final IOException e) {
-            new SQLBansException("Could not load default table creation text", e).printStackTrace();
-        }
-        SQLBans.TABLE_CREATE = String.format(builder.toString(), getConfig().getString("database.tablename") != null ? getConfig().getString("database.tablename") : "SQLBans_bans");
-
         // Command registration
-        this.getCommand("ban").setExecutor(new BanCommand(this));
-        this.getCommand("kick").setExecutor(new KickCommand(this));
-        this.getCommand("sqlbansreload").setExecutor(new ReloadCommand(this));
-        this.getCommand("unban").setExecutor(new UnbanCommand(this));
+        this.implementation.registerCommand(new BanCommand(this));
+        this.implementation.registerCommand(new KickCommand(this));
+        this.implementation.registerCommand(new ReloadCommand(this));
+        this.implementation.registerCommand(new UnbanCommand(this));
 
-        this.getServer().getPluginManager().registerEvents(this, this);
+        this.getScheduler().repeatingTask(new BackupTask(this), 5, 300);
 
-        this.getServer().getScheduler().scheduleAsyncRepeatingTask(this, new BackupTask(this), 100, 6000);
-
-        this.load();
+        this.implementation.registerLoginAttemptListening();
     }
 
-    @EventHandler(priority = EventPriority.LOWEST)
-    public void onPlayerPreLogin(AsyncPlayerPreLoginEvent event) {
-        synchronized (this.bannedCacheSync) {
-            if (this.bannedCache.contains(event.getName())) {
-                event.disallow(Result.KICK_BANNED, SQLBans.Messages.getDisconnectRejected());
-                return;
-            }
-        }
-        try {
-            if (!SQLHandler.canJoin(event.getName())) {
-                event.disallow(Result.KICK_BANNED, SQLBans.Messages.getDisconnectRejected());
-                synchronized (this.bannedCacheSync) {
-                    final String name = event.getName();
-                    this.bannedCache.add(name);
-                    this.getServer().getScheduler().scheduleSyncDelayedTask(this, new Runnable() {
-                        public void run() {
-                            synchronized (SQLBans.this.bannedCacheSync) {
-                                SQLBans.this.removeCachedBan(name);
-                            }
-                        }
-                    }, 1200);
+    /**
+     * Ban an IP address.
+     * 
+     * @param address
+     *            InetAddress to ban
+     * @param reason
+     *            Reason for the ban
+     * @param admin
+     *            Who banned the user. 16 character limit
+     */
+    public void banIP(final InetAddress address, final String reason, final String admin) {
+        Util.nullCheck(address, "IP Address");
+        Util.nullCheck(reason, "Ban reason");
+        Util.nullCheck(admin, "Admin");
+        this.getScheduler().run(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    SQLBans.this.sql.ban(address, reason, admin);
+                    SQLBans.this.banCache.addIP(address);
+                } catch (final Exception e) {
+                    SQLBans.this.getLogger().log(Level.SEVERE, "Could not ban " + address.getHostAddress(), e);
+                    SQLBans.this.sendMessage(Perm.MESSAGE_BAN_ADMIN, ChatColor.RED + "[SQLBans] Failed to ban " + address.getHostAddress());
                 }
             }
+        });
+    }
+
+    /**
+     * Ban a username.
+     * 
+     * @param name
+     *            Username to ban
+     * @param reason
+     *            Reason for the ban
+     * @param admin
+     *            Who banned the user. 16 character limit
+     */
+    public void banName(final String name, final String reason, final String admin) {
+        Util.nullCheck(name, "Username");
+        Util.nullCheck(reason, "Ban reason");
+        Util.nullCheck(admin, "Admin");
+        this.getScheduler().run(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    SQLBans.this.sql.ban(name, reason, admin);
+                    SQLBans.this.banCache.addName(name);
+                } catch (final Exception e) {
+                    SQLBans.this.getLogger().log(Level.SEVERE, "Could not ban " + name, e);
+                    SQLBans.this.sendMessage(Perm.MESSAGE_BAN_ADMIN, ChatColor.RED + "[SQLBans] Failed to ban " + name);
+                }
+            }
+        });
+    }
+
+    /**
+     * Get the Logger
+     * 
+     * @return the current implementation's logger
+     */
+    public Logger getLogger() {
+        return this.implementation.getLogger();
+    }
+
+    /**
+     * Get an array of online players
+     * 
+     * @return online Players from the implementation
+     */
+    public Player[] getOnlinePlayers() {
+        return this.implementation.getOnlinePlayers();
+    }
+
+    /**
+     * Get a Player by name
+     * 
+     * @param name
+     *            Username queried
+     * @return Player from the implementation
+     */
+    public Player getPlayer(String name) {
+        Util.nullCheck(name, "Player name");
+        return this.implementation.getPlayer(name);
+    }
+
+    /**
+     * Get an InputStream of a file by path
+     * 
+     * @param path
+     *            Path to the file
+     * @return InputStream for the file or null if not found
+     * @throws IOException
+     *             If something goes terribly wrong
+     */
+    public InputStream getResource(String path) throws IOException {
+        Util.nullCheck(path, "Resource path");
+        final URL url = this.getClass().getClassLoader().getResource(path);
+        if (url == null) {
+            return null;
+        }
+        final URLConnection urlConnection = url.openConnection();
+        urlConnection.setUseCaches(false);
+        return urlConnection.getInputStream();
+    }
+
+    /**
+     * Get the Scheduler
+     * 
+     * @return the implementation's scheduler
+     */
+    public Scheduler getScheduler() {
+        return this.implementation.getScheduler();
+    }
+
+    /**
+     * Get the current server name as defined in config
+     * 
+     * @return the current server name
+     */
+    public String getServerName() {
+        return this.serverName;
+    }
+
+    /**
+     * Get the current SQLBans version
+     * 
+     * @return the implementation's stored version
+     */
+    public String getVersion() {
+        return this.implementation.getVersion();
+    }
+
+    /**
+     * Process if a user may join the server, by username and IP
+     * Sets the Result of the UserData and a disconnect reason
+     * 
+     * @param data
+     *            UserData which will be processed
+     * @param isJoin
+     *            Set to true to indicate this is an actual join attempt, to log the username/IP
+     */
+    public void processUserData(UserData data, boolean isJoin) {
+        Util.nullCheck(data, "UserData");
+        if (this.banCache.containsName(data.getName()) || this.banCache.containsIP(data.getIP())) {
+            data.disallow(UserData.Result.KICK_BANNED, SQLBans.Messages.getDisconnectRejected());
+            return;
+        }
+        try {
+            if (!this.sql.canJoin(data.getName())) {
+                data.disallow(UserData.Result.KICK_BANNED, SQLBans.Messages.getDisconnectRejected());
+                this.banCache.addName(data.getName());
+            }
+            if (!this.sql.canJoin(data.getIP())) {
+                data.disallow(UserData.Result.KICK_BANNED, SQLBans.Messages.getDisconnectRejected());
+                this.banCache.addIP(data.getIP());
+            }
+            if (isJoin) {
+                this.sql.logJoin(data.getName(), data.getIP());
+            }
         } catch (final Exception e) {
-            event.disallow(Result.KICK_OTHER, "Connection error: Please retry.");
+            data.disallow(UserData.Result.KICK_OTHER, "Connection error: Please retry.");
             this.getLogger().log(Level.SEVERE, "Severe error on user connect", e);
         }
     }
 
-    public void removeCachedBan(String name) {
-        this.bannedCache.remove(name);
+    /**
+     * Reload configuration and restart SQL connection
+     * Called on startup and in reload command
+     * 
+     * @throws SQLBansException
+     */
+    public void reload() throws SQLBansException {
+        this.config = new Config(this);
+        SQLBans.Messages.load(this.config);
+        this.serverName = this.config.getString("server-name");
+        final String host = this.config.getString("database.host");
+        final int port = this.config.getInt("database.port");
+        final String db = this.config.getString("database.database");
+        final String user = this.config.getString("database.auth.username");
+        final String pass = this.config.getString("database.auth.password");
+        final String bansTableName = this.config.getString("database.tablenames.bans", "SQLBans_bans");
+        final String logTableName = this.config.getString("database.tablenames.log", "SQLBans_log");
+
+        String tableCreate = null;
+        final StringBuilder builder = new StringBuilder();
+        try {
+            final BufferedReader reader = new BufferedReader(new InputStreamReader(this.getResource("create.sql")));
+            String next;
+            while ((next = reader.readLine()) != null) {
+                builder.append(next);
+            }
+            tableCreate = String.format(builder.toString(), bansTableName, logTableName);
+        } catch (final IOException e) {
+            new SQLBansException("Could not load default table creation text", e).printStackTrace();
+        }
+        try {
+            this.sql = new SQLHandler(this, host, port, user, pass, db, bansTableName, logTableName, tableCreate);
+        } catch (final SQLBansException e) {
+            this.getLogger().log(Level.SEVERE, "Failure to load, shutting down", e);
+            this.implementation.shutdown();
+            throw new SQLBansException("Shutdown");
+        }
     }
 
+    /**
+     * Save a resource to the plugin folder, by path
+     * 
+     * @param path
+     *            Path to the local resource
+     * @param replace
+     *            If true, overwrite on save
+     * @throws IOException
+     *             If something goes horribly wrong
+     * @throws SQLBansException
+     *             If the resource doesn't exist to begin with
+     */
+    public void saveResource(String path, boolean replace) throws IOException, SQLBansException {
+        Util.nullCheck(path, "Resource path");
+        InputStream input = null;
+        OutputStream output = null;
+        try {
+            input = this.getResource(path);
+            if (input == null) {
+                throw new SQLBansException("Resource not found: " + path);
+            }
+            final File outputFile = new File(this.getDataFolder(), path);
+            final int slashLocation = path.lastIndexOf("/");
+            final File outputFolder = slashLocation >= 0 ? new File(this.getDataFolder(), path.substring(0, slashLocation)) : this.getDataFolder();
+            outputFolder.mkdirs();
+            if (replace || !outputFile.exists()) {
+                output = new FileOutputStream(outputFile);
+                final byte[] buf = new byte[1024];
+                int len;
+                while ((len = input.read(buf)) > 0) {
+                    output.write(buf, 0, len);
+                }
+            }
+        } finally {
+            try {
+                if (input != null) {
+                    input.close();
+                }
+                if (output != null) {
+                    output.close();
+                }
+            } catch (final IOException e) {
+                // Moot!
+            }
+        }
+    }
+
+    /**
+     * Send a message to all Players with a permission
+     * 
+     * @param permission
+     *            Permission to check against
+     * @param message
+     *            Message to send
+     */
+    public void sendMessage(Perm permission, String message) {
+        Util.nullCheck(permission, "Permission");
+        Util.nullCheck(message, "Message");
+        this.implementation.sendMessage(permission, message);
+    }
+
+    /**
+     * Unban an IP address
+     * 
+     * @param address
+     *            InetAddress to unban
+     */
+    public void unbanIP(final InetAddress address) {
+        Util.nullCheck(address, "IP Address");
+        this.getScheduler().run(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    SQLBans.this.sql.unban(address);
+                    SQLBans.this.banCache.removeIP(address);
+                } catch (final Exception e) {
+                    SQLBans.this.getLogger().log(Level.SEVERE, "Could not unban " + address.getHostAddress(), e);
+                    SQLBans.this.sendMessage(Perm.MESSAGE_UNBAN_ADMIN, ChatColor.RED + "[SQLBans] Failed to unban " + address.getHostAddress());
+                }
+            }
+        });
+    }
+
+    /**
+     * Unban a username
+     * 
+     * @param name
+     *            Username to unban
+     */
+    public void unbanName(final String name) {
+        Util.nullCheck(name, "Username");
+        this.getScheduler().run(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    SQLBans.this.sql.unban(name);
+                    SQLBans.this.banCache.removeName(name);
+                } catch (final Exception e) {
+                    SQLBans.this.getLogger().log(Level.SEVERE, "Could not unban " + name, e);
+                    SQLBans.this.sendMessage(Perm.MESSAGE_UNBAN_ADMIN, ChatColor.RED + "[SQLBans] Failed to unban " + name);
+                }
+            }
+        });
+    }
+
+    BanCache getBanCache() {
+        return this.banCache;
+    }
+
+    File getDataFolder() {
+        return this.implementation.getDataFolder();
+    }
+
+    SQLHandler getSQL() {
+        return this.sql;
+    }
 }

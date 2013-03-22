@@ -17,35 +17,18 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.kitteh.sqlbans.exceptions;
+package org.kitteh.sqlbans.api;
 
 /**
- * Something has gone horribly wrong
+ * A Player
  */
-public final class SQLBansException extends Exception {
-
-    private static final long serialVersionUID = 1L;
+public interface Player extends CommandSender {
 
     /**
-     * Something has gone wrong with a message
+     * Kick the Player
      * 
-     * @param string
-     *            Message
+     * @param reason
+     *            Reason to send when kicking
      */
-    public SQLBansException(String string) {
-        super(string);
-    }
-
-    /**
-     * Something has gone wrong with message and a throwable
-     * 
-     * @param string
-     *            Message
-     * @param throwable
-     *            Further wrongness
-     */
-    public SQLBansException(String string, Throwable throwable) {
-        super(string, throwable);
-    }
-
+    public void kick(String reason);
 }

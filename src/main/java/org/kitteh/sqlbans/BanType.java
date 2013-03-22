@@ -17,35 +17,41 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.kitteh.sqlbans.exceptions;
+package org.kitteh.sqlbans;
 
 /**
- * Something has gone horribly wrong
+ * Types of bans available
  */
-public final class SQLBansException extends Exception {
-
-    private static final long serialVersionUID = 1L;
+public enum BanType {
 
     /**
-     * Something has gone wrong with a message
-     * 
-     * @param string
-     *            Message
+     * Username bans
      */
-    public SQLBansException(String string) {
-        super(string);
+    NAME("player", 0),
+    /**
+     * IP address bans
+     */
+    IP("ip", 1);
+
+    private final int id;
+    private final String name;
+
+    private BanType(String name, int id) {
+        this.id = id;
+        this.name = name;
     }
 
     /**
-     * Something has gone wrong with message and a throwable
+     * Get the internal int ID of the ban type, used in SQL
      * 
-     * @param string
-     *            Message
-     * @param throwable
-     *            Further wrongness
+     * @return the internal ban type ID
      */
-    public SQLBansException(String string, Throwable throwable) {
-        super(string, throwable);
+    public int getID() {
+        return this.id;
     }
 
+    @Override
+    public String toString() {
+        return this.name;
+    }
 }
