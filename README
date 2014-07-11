@@ -1,5 +1,9 @@
-SQLBans
+# SQLBans #
 
-Woo
+SQLBans intends to be a simple solution to the lack of a quality, fully configurable, easy to use banning plugin utilizing MySQL to enable multiple servers in one gaming network to operate on a single, shared bans list.
+
+This is not a global banning system, this is a local banning system for server admins running multiple servers.
+
+SQLBans is fairly lightweight and efficient.
 
 Check LICENSE for license info
